@@ -1,0 +1,88 @@
+#! /usr/bin/perl -w
+
+use strict;
+use POSIX qw(strftime);
+use File::Temp qw(tempdir);
+use Getopt::Long qw(:config no_ignore_case);
+
+my $thishost=$ENV{HOSTNAME};
+unless ($thishost) {
+  open I,'</etc/hostname';
+  $thishost=join('',<I>);
+  $thishost =~ s/[^-A-Za-z\d].*//g;
+  close I;
+}
+my %o=(host => 'pyromachy',
+       destination => "/storage/fullback/$thishost",
+       user => "backup$thishost",
+       source => '/');
+
+GetOptions('host|H=s' => \$o{host},
+           'help|h' => \$o{help},
+           'destination|d=s' => \$o{destination},
+           'user|u=s' => \$o{user},
+           'source|s=s' => \$o{source},
+           'exclude|x=s@' => \$o{exclude});
+
+if ($o{help}) {
+  print STDERR <<EOF;
+Usage: $0 (options...)
+-s path    - source path ($o{source})
+-H host    - target host ($o{host})
+-u user    - target user ($o{user})
+-d path    - target path ($o{destination})
+-x exclude - rsync exclude pattern
+EOF
+  exit 0;
+}
+
+unless ($o{destination}) {
+  die "Specify target path with -d - -h for help\n";
+}
+
+unless ($o{host}) {
+  die "Specify target host with -H - -h for help\n";
+}
+
+unless ($o{source}) {
+  die "Specify source path with -s - -h for help\n";
+}
+
+my @old;
+open D,'-|',qw(ssh -l),$o{user},$o{host},'ls',$o{destination};
+while (<D>) {
+  chomp;
+  if (/^\d{8}T\d{6}/) {
+    push @old,$_;
+  }
+}
+close D;
+
+# establish new backup
+my @t=gmtime;
+#  push @log,'Started at '.sprintf('%04d-%02d-%02d %02d:%02d:%02d Z',$t[5]+1900,$t[4]+1,$t[3],$t[2],$t[1],$t[0]);
+my $thisbackup=strftime('%Y%m%dT%H%M%S',@t);
+system(qw(ssh -l),$o{user},$o{host},'mkdir',"$o{destination}/$thisbackup");
+
+# build command line for rsync - full archive, compress, hardlink, no span
+my @cmdline=qw(ionice -c3 rsync -azHx -M--fake-super);
+# any exclusions
+if ($o{exclude}) {
+  push @cmdline,map {"--exclude=$_"} @{$o{exclude}};
+}
+
+foreach (1..10) {
+  if (@old) {
+    push @cmdline,("--link-dest=$o{destination}/".(pop @old));
+  }
+}
+# source path
+push @cmdline,"$o{source}/";
+# dest host/path
+push @cmdline,"$o{user}\@$o{host}:$o{destination}/$thisbackup/";
+
+# actually do the thing
+system(@cmdline);
+
+# touch backup dir to end time
+system(qw(ssh -l),$o{user},$o{host},'touch',"$o{destination}/$thisbackup");

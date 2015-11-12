@@ -1,0 +1,25 @@
+#! /usr/bin/perl
+
+use strict;
+use warnings;
+
+my $base='/storage/fullback';
+my $rotate=10;
+
+chdir $base or die "Can't find backup directory $base\n";
+
+my @unlink;
+
+opendir D,'.';
+foreach my $host (grep !/^\./,readdir D) {
+  opendir H,"$base/$host";
+  my @backups=sort grep /^[0-9]{8}T[0-9]{6}$/,readdir H;
+  closedir H;
+  if (scalar @backups > $rotate) {
+    splice @backups,-$rotate;
+    push @unlink,map {"$base/$host/$_"} @backups;
+  }
+}
+closedir D;
+
+system(qw(rm -rf),@unlink);

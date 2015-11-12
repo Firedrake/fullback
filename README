@@ -1,0 +1,62 @@
+: Idea
+
+This is a system for backing up multiple hosts onto a single server.
+The backup is driven from the host's end, multiple backups are kept,
+and even a compromised host cannot access any non-public files from
+other hosts' backups.
+
+You will need perl and a reasonably recent rsync (that supports
+fake-super).
+
+It's tied to Linux in that it uses ionice, but if you want to run it
+under some other Unix just remove that part.
+
+: Setup
+
+Tweak remote_backup and indeed scrub_old_backups so that their
+defaults are useful.
+
+:: Server setup
+
+I assume SERVER's backup repository is in /storage/fullback (I
+use a ZFS volume with dedup).
+
+:: Per-host setup
+
+I will call the backup server SERVER, and the machine to be backed up
+HOST.
+
+Copy remote_backup to /usr/local/sbin/ or somewhere else suitable,
+executable by root only.
+
+on HOST, as root:
+
+# export REMHOST=$(hostname) # or set it some other way
+# umask 077
+# ssh-keygen -t ed25519 -C backup@$REMHOST
+# cat /root/.ssh/id_ed25519.pub # you will copy this to another terminal
+
+(Obviously you can use a different ssh key protocol but this is one I
+wasn't already using for anything else.)
+
+on SERVER, as root:
+
+# export REMHOST=HOST # whatever you set earlier on the other machine
+# adduser --system --shell /bin/bash --home /storage/fullback/$REMHOST backup$REMHOST
+# umask 077
+# mkdir /storage/fullback/$REMHOST/.ssh
+# cat >/storage/fullback/$REMHOST/.ssh/authorized_keys # paste in the key
+# chown -R backup$REMHOST /storage/fullback/$REMHOST
+
+then on HOST again, to make sure it works:
+
+# ssh backup$REMHOST@SERVER ls /
+
+which should (after key verification) show you the root directory
+listing on SERVER.
+
+Finally set up a cronjob on HOST with any relevant parameters, e.g.
+
+17 6 * * * /usr/local/sbin/remote_backup -x /mnt
+
+(You can specify multiple exclude paths with multiple -x options.)
