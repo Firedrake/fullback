@@ -1,6 +1,8 @@
-#! /usr/bin/perl -w
+#! /usr/bin/perl
 
 use strict;
+use warnings;
+
 use POSIX qw(strftime);
 use File::Temp qw(tempdir);
 use Getopt::Long qw(:config no_ignore_case);
@@ -15,14 +17,16 @@ unless ($thishost) {
 my %o=(host => 'pyromachy',
        destination => "/storage/fullback/$thishost",
        user => "backup$thishost",
-       source => '/');
+       source => '/',
+       v4 => 0);
 
 GetOptions('host|H=s' => \$o{host},
            'help|h' => \$o{help},
            'destination|d=s' => \$o{destination},
            'user|u=s' => \$o{user},
            'source|s=s' => \$o{source},
-           'exclude|x=s@' => \$o{exclude});
+           'exclude|x=s@' => \$o{exclude},
+           'ipv4|4' => \$o{4});
 
 if ($o{help}) {
   print STDERR <<EOF;
@@ -31,7 +35,9 @@ Usage: $0 (options...)
 -H host    - target host ($o{host})
 -u user    - target user ($o{user})
 -d path    - target path ($o{destination})
--x exclude - rsync exclude pattern
+-x exclude - rsync exclude pattern (repeatable)
+-4         - use IPv4 if possible
+}
 EOF
   exit 0;
 }
@@ -48,8 +54,12 @@ unless ($o{source}) {
   die "Specify source path with -s - -h for help\n";
 }
 
+my @ssh=('ssh');
+if ($o{4}) {
+  push @ssh,'-4';
+}
 my @old;
-open D,'-|',qw(ssh -l),$o{user},$o{host},'ls',$o{destination};
+open D,'-|',@ssh,'-l',$o{user},$o{host},'ls',$o{destination};
 while (<D>) {
   chomp;
   if (/^\d{8}T\d{6}/) {
@@ -62,10 +72,13 @@ close D;
 my @t=gmtime;
 #  push @log,'Started at '.sprintf('%04d-%02d-%02d %02d:%02d:%02d Z',$t[5]+1900,$t[4]+1,$t[3],$t[2],$t[1],$t[0]);
 my $thisbackup=strftime('%Y%m%dT%H%M%S',@t);
-system(qw(ssh -l),$o{user},$o{host},'mkdir',"$o{destination}/$thisbackup");
+system(@ssh,'-l',$o{user},$o{host},'mkdir',"$o{destination}/$thisbackup");
 
 # build command line for rsync - full archive, compress, hardlink, no span
 my @cmdline=qw(ionice -c3 rsync -azHx -M--fake-super);
+if ($o{4}) {
+  push @cmdline,'-4';
+}
 # any exclusions
 if ($o{exclude}) {
   push @cmdline,map {"--exclude=$_"} @{$o{exclude}};
@@ -85,4 +98,4 @@ push @cmdline,"$o{user}\@$o{host}:$o{destination}/$thisbackup/";
 system(@cmdline);
 
 # touch backup dir to end time
-system(qw(ssh -l),$o{user},$o{host},'touch',"$o{destination}/$thisbackup");
+system(@ssh,'-l',$o{user},$o{host},'touch',"$o{destination}/$thisbackup");
